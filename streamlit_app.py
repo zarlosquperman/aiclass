@@ -160,7 +160,7 @@ if uploaded_file is not None:
     # 확률을 내림차순으로 정렬 (시각적으로 보기 좋게)
     prob_list = sorted(zip(labels, probs), key=lambda x: x[1], reverse=True)
 
-    for label, prob in prob-list:
+    for label, prob in prob_list:
         # 가장 높은 확률(예측된 클래스)인지 확인
         highlight_class = "highlight" if label == prediction else ""
 
