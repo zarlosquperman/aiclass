@@ -69,7 +69,7 @@ st.markdown("---")
 # ======================
 CONTENT_BY_LABEL: dict[str, dict[str, list[str]]] = {
     # 예)
-     "짬뽕": {
+     labels[2]: {
        "texts": ["짬뽕의 특징과 유래", "국물 맛 포인트", "지역별 스타일 차이"],
        "images": ["https://www.newiki.net/w/images/thumb/1/11/Jjampong.jpg/450px-Jjampong.jpg"],
        "videos": ["https://youtu.be/gA8k4YUuAR4"]
