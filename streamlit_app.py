@@ -1,241 +1,184 @@
-# streamlit_py
-import os, re
-from io import BytesIO
-import numpy as np
-import streamlit as st
-from PIL import Image, ImageOps
-from fastai.vision.all import *
-import gdown
+#streamlit_app.py
 
-# ======================
-# 페이지/스타일
-# ======================
-st.set_page_config(page_title="Fastai 이미지 분류기", page_icon="🤖", layout="wide")
+import streamlit as st
+from fastai.vision.all import *
+from PIL import Image
+import gdown
+import os # 파일 존재 여부 확인을 위해 import
+
+# --- 1. 페이지 기본 설정 ---
+st.set_page_config(
+    page_title="Fastai 이미지 분류기",
+    page_icon="🤖"
+)
+
+# --- 2. 커스텀 CSS ---
 st.markdown("""
 <style>
-h1 { color:#1E88E5; text-align:center; font-weight:800; letter-spacing:-0.5px; }
-.prediction-box { background:#E3F2FD; border:2px solid #1E88E5; border-radius:12px; padding:22px; text-align:center; margin:16px 0; box-shadow:0 4px 10px rgba(0,0,0,.06);}
-.prediction-box h2 { color:#0D47A1; margin:0; font-size:2.0rem; }
-.prob-card { background:#fff; border-radius:10px; padding:12px 14px; margin:10px 0; box-shadow:0 2px 6px rgba(0,0,0,.06); }
-.prob-bar-bg { background:#ECEFF1; border-radius:6px; width:100%; height:22px; overflow:hidden; }
-.prob-bar-fg { background:#4CAF50; height:100%; border-radius:6px; transition:width .5s; }
-.prob-bar-fg.highlight { background:#FF6F00; }
-.info-grid { display:grid; grid-template-columns:repeat(12,1fr); gap:14px; }
-.card { border:1px solid #e3e6ea; border-radius:12px; padding:14px; background:#fff; box-shadow:0 2px 6px rgba(0,0,0,.05); }
-.card h4 { margin:0 0 10px; font-size:1.05rem; color:#0D47A1; }
-.thumb { width:100%; height:auto; border-radius:10px; display:block; }
-.thumb-wrap { position:relative; display:block; }
-.play { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:60px; height:60px; border-radius:50%; background:rgba(0,0,0,.55); }
-.play:after{ content:''; border-style:solid; border-width:12px 0 12px 20px; border-color:transparent transparent transparent #fff; position:absolute; top:50%; left:50%; transform:translate(-40%,-50%); }
-.helper { color:#607D8B; font-size:.9rem; }
-.stFileUploader, .stCameraInput { border:2px dashed #1E88E5; border-radius:12px; padding:16px; background:#f5fafe; }
+/* 페이지 타이틀 */
+h1 {
+    color: #1E88E5; /* Blue */
+    text-align: center;
+    font-weight: bold;
+}
+
+/* 파일 업로더 */
+.stFileUploader {
+    border: 2px dashed #1E88E5;
+    border-radius: 10px;
+    padding: 15px;
+    background-color: #f5fafe;
+}
+
+/* 예측 결과 박스 */
+.prediction-box {
+    background-color: #E3F2FD; /* Light Blue */
+    border: 2px solid #1E88E5;
+    border-radius: 10px;
+    padding: 25px;
+    text-align: center;
+    margin: 20px 0;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+}
+
+.prediction-box h2 {
+    color: #0D47A1; /* Dark Blue */
+    margin: 0;
+    font-size: 2.5rem; /* 글자 크기 키움 */
+}
+
+/* 확률 표시용 카드 스타일 */
+.prob-card {
+    background-color: #FFFFFF;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 10px 0;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.08);
+    transition: transform 0.2s ease;
+}
+.prob-card:hover {
+    transform: translateY(-3px); /* 마우스 올리면 살짝 위로 */
+}
+
+.prob-label {
+    font-weight: bold;
+    font-size: 1.1rem;
+    color: #333;
+}
+
+.prob-bar-bg {
+    background-color: #E0E0E0; /* Light Gray */
+    border-radius: 5px;
+    width: 100%;
+    height: 22px;
+    overflow: hidden; /* 둥근 모서리 적용 */
+}
+
+.prob-bar-fg {
+    background-color: #4CAF50; /* Green */
+    height: 100%;
+    border-radius: 5px 0 0 5px; /* 왼쪽만 둥글게 */
+    text-align: right;
+    padding-right: 8px;
+    color: white;
+    font-weight: bold;
+    line-height: 22px; /* 텍스트 세로 중앙 정렬 */
+    transition: width 0.5s ease-in-out; /* 너비 변경 애니메이션 */
+}
+
+/* 가장 높은 확률의 바 */
+.prob-bar-fg.highlight {
+    background-color: #FF6F00; /* Orange */
+}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("이미지 분류기 (Fastai) — 확률 막대 + 라벨별 고정 콘텐츠")
 
-# ======================
-# 세션 상태
-# ======================
-if "img_bytes" not in st.session_state:
-    st.session_state.img_bytes = None
-if "last_prediction" not in st.session_state:
-    st.session_state.last_prediction = None
+# --- 3. 모델 로드 ---
 
-# ======================
-# 모델 로드
-# ======================
-FILE_ID = st.secrets.get("GDRIVE_FILE_ID", "19dS6rAzHlGekODz1l2F020D9XMlhNDYS")
-MODEL_PATH = st.secrets.get("MODEL_PATH", "model.pkl")
+# Google Drive 파일 ID
+file_id = '19dS6rAzHlGekODz1l2F020D9XMlhNDYS'
+model_path = 'model.pkl'
 
+# st.cache_resource: 모델과 같이 큰 리소스를 캐시합니다.
 @st.cache_resource
-def load_model_from_drive(file_id: str, output_path: str):
+def load_model_from_drive(file_id, output_path):
+    # 파일이 이미 존재하지 않으면 다운로드
     if not os.path.exists(output_path):
-        url = f"https://drive.google.com/uc?id={file_id}"
+        url = f'https://drive.google.com/uc?id={file_id}'
         gdown.download(url, output_path, quiet=False)
-    return load_learner(output_path, cpu=True)
 
-with st.spinner("🤖 모델 로드 중..."):
-    learner = load_model_from_drive(FILE_ID, MODEL_PATH)
-st.success("✅ 모델 로드 완료")
+    # Fastai 모델 로드
+    learner = load_learner(output_path)
+    return learner
 
-labels = [str(x) for x in learner.dls.vocab]
+# st.spinner: 모델 로딩 중에 스피너(빙글빙글 아이콘)를 보여줍니다.
+with st.spinner("🤖 AI 모델을 불러오는 중입니다. 잠시만 기다려주세요..."):
+    learner = load_model_from_drive(file_id, model_path)
+
+st.success("✅ 모델 로드가 완료되었습니다!")
+
+# 모델의 분류 라벨
+labels = learner.dls.vocab
+st.title(f"이미지 분류기 (Fastai)")
 st.write(f"**분류 가능한 항목:** `{', '.join(labels)}`")
 st.markdown("---")
 
-# ======================
-# 라벨 이름 매핑: 여기를 채우세요!
-# 각 라벨당 최대 3개씩 표시됩니다.
-# ======================
-CONTENT_BY_LABEL: dict[str, dict[str, list[str]]] = {
-    # 예)
-    # "짬뽕": {
-    #   "texts": ["짬뽕의 특징과 유래", "국물 맛 포인트", "지역별 스타일 차이"],
-    #   "images": ["https://.../jjampong1.jpg", "https://.../jjampong2.jpg"],
-    #   "videos": ["https://youtu.be/XXXXXXXXXXX"]
-    # },
-}
+# --- 4. 파일 업로드 및 예측 ---
+uploaded_file = st.file_uploader("분류할 이미지를 업로드하세요 (jpg, png, jpeg 등)", type=["jpg", "png", "jpeg", "webp", "tiff"])
 
-# ======================
-# 유틸
-# ======================
-def load_pil_from_bytes(b: bytes) -> Image.Image:
-    pil = Image.open(BytesIO(b))
-    pil = ImageOps.exif_transpose(pil)
-    if pil.mode != "RGB": pil = pil.convert("RGB")
-    return pil
+if uploaded_file is not None:
+    # 업로드된 이미지 보여주기
+    image = Image.open(uploaded_file)
+    st.image(image, caption="업로드된 이미지", use_column_width=True)
 
-def yt_id_from_url(url: str) -> str | None:
-    if not url: return None
-    pats = [r"(?:v=|/)([0-9A-Za-z_-]{11})(?:\?|&|/|$)", r"youtu\.be/([0-9A-Za-z_-]{11})"]
-    for p in pats:
-        m = re.search(p, url)
-        if m: return m.group(1)
-    return None
+    # Fastai에서 예측을 위해 이미지를 처리
+    # (주의: PILImage.create는 fastai 구버전일 수 있습니다. 최신 버전에 맞춰 바이트로 열기)
+    try:
+        img_bytes = uploaded_file.getvalue()
+        img = PILImage.create(img_bytes)
+    except Exception as e:
+        st.error(f"이미지 처리 중 오류 발생: {e}")
+        st.stop()
 
-def yt_thumb(url: str) -> str | None:
-    vid = yt_id_from_url(url)
-    return f"https://img.youtube.com/vi/{vid}/hqdefault.jpg" if vid else None
+    # 예측 수행
+    with st.spinner("🧠 이미지를 분석 중입니다..."):
+        prediction, pred_idx, probs = learner.predict(img)
 
-def pick_top3(lst):
-    return [x for x in lst if isinstance(x, str) and x.strip()][:3]
+    # --- 5. 결과 출력 ---
 
-def get_content_for_label(label: str):
-    """라벨명으로 콘텐츠 반환 (texts, images, videos). 없으면 빈 리스트."""
-    cfg = CONTENT_BY_LABEL.get(label, {})
-    return (
-        pick_top3(cfg.get("texts", [])),
-        pick_top3(cfg.get("images", [])),
-        pick_top3(cfg.get("videos", [])),
-    )
+    # 예측된 클래스 출력 (스타일 적용)
+    st.markdown(f"""
+    <div class="prediction-box">
+        <span style="font-size: 1.2rem; color: #555;">예측 결과:</span>
+        <h2>{prediction}</h2>
+    </div>
+    """, unsafe_allow_html=True)
 
-# ======================
-# 입력(카메라/업로드)
-# ======================
-tab_cam, tab_file = st.tabs(["📷 카메라로 촬영", "📁 파일 업로드"])
-new_bytes = None
 
-with tab_cam:
-    cam = st.camera_input("카메라 스냅샷", label_visibility="collapsed")
-    if cam is not None:
-        new_bytes = cam.getvalue()
+    # 클래스별 확률을 HTML과 CSS로 시각화
+    st.markdown("<h3>상세 예측 확률:</h3>", unsafe_allow_html=True)
 
-with tab_file:
-    f = st.file_uploader("이미지를 업로드하세요 (jpg, png, jpeg, webp, tiff)",
-                         type=["jpg","png","jpeg","webp","tiff"])
-    if f is not None:
-        new_bytes = f.getvalue()
+    # 확률을 내림차순으로 정렬 (시각적으로 보기 좋게)
+    prob_list = sorted(zip(labels, probs), key=lambda x: x[1], reverse=True)
 
-if new_bytes:
-    st.session_state.img_bytes = new_bytes
+    for label, prob in prob-list:
+        # 가장 높은 확률(예측된 클래스)인지 확인
+        highlight_class = "highlight" if label == prediction else ""
 
-# ======================
-# 예측 & 레이아웃
-# ======================
-if st.session_state.img_bytes:
-    top_l, top_r = st.columns([1, 1], vertical_alignment="center")
+        prob_percent = prob * 100
 
-    pil_img = load_pil_from_bytes(st.session_state.img_bytes)
-    with top_l:
-        st.image(pil_img, caption="입력 이미지", use_container_width=True)
-
-    with st.spinner("🧠 분석 중..."):
-        pred, pred_idx, probs = learner.predict(PILImage.create(np.array(pil_img)))
-        st.session_state.last_prediction = str(pred)
-
-    with top_r:
-        st.markdown(
-            f"""
-            <div class="prediction-box">
-                <span style="font-size:1.0rem;color:#555;">예측 결과:</span>
-                <h2>{st.session_state.last_prediction}</h2>
-                <div class="helper">오른쪽 패널에서 예측 라벨의 콘텐츠가 표시됩니다.</div>
-            </div>
-            """, unsafe_allow_html=True
-        )
-
-    left, right = st.columns([1,1], vertical_alignment="top")
-
-    # 왼쪽: 확률 막대
-    with left:
-        st.subheader("상세 예측 확률")
-        prob_list = sorted(
-            [(labels[i], float(probs[i])) for i in range(len(labels))],
-            key=lambda x: x[1], reverse=True
-        )
-        for lbl, p in prob_list:
-            pct = p * 100
-            hi = "highlight" if lbl == st.session_state.last_prediction else ""
-            st.markdown(
-                f"""
-                <div class="prob-card">
-                  <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-                    <strong>{lbl}</strong><span>{pct:.2f}%</span>
-                  </div>
-                  <div class="prob-bar-bg">
-                    <div class="prob-bar-fg {hi}" style="width:{pct:.4f}%;"></div>
-                  </div>
+        st.markdown(f"""
+        <div class="prob-card">
+            <span class="prob-label">{label}</span>
+            <div class="prob-bar-bg">
+                <div class="prob-bar-fg {highlight_class}" style="width: {prob_percent}%;">
+                    {prob_percent:.2f}%
                 </div>
-                """, unsafe_allow_html=True
-            )
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # 오른쪽: 정보 패널 (예측 라벨 기본, 다른 라벨로 바꿔보기 가능)
-    with right:
-        st.subheader("라벨별 고정 콘텐츠")
-        default_idx = labels.index(st.session_state.last_prediction) if st.session_state.last_prediction in labels else 0
-        info_label = st.selectbox("표시할 라벨 선택", options=labels, index=default_idx)
-
-        texts, images, videos = get_content_for_label(info_label)
-
-        if not any([texts, images, videos]):
-            st.info(f"라벨 `{info_label}`에 대한 콘텐츠가 아직 없습니다. 코드의 CONTENT_BY_LABEL에 추가하세요.")
-        else:
-            # 텍스트
-            if texts:
-                st.markdown('<div class="info-grid">', unsafe_allow_html=True)
-                for t in texts:
-                    st.markdown(f"""
-                    <div class="card" style="grid-column:span 12;">
-                      <h4>텍스트</h4>
-                      <div>{t}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            # 이미지(최대 3, 3열)
-            if images:
-                st.markdown('<div class="info-grid">', unsafe_allow_html=True)
-                for url in images[:3]:
-                    st.markdown(f"""
-                    <div class="card" style="grid-column:span 4;">
-                      <h4>이미지</h4>
-                      <img src="{url}" class="thumb" />
-                    </div>
-                    """, unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            # 동영상(유튜브 썸네일)
-            if videos:
-                st.markdown('<div class="info-grid">', unsafe_allow_html=True)
-                for v in videos[:3]:
-                    thumb = yt_thumb(v)
-                    if thumb:
-                        st.markdown(f"""
-                        <div class="card" style="grid-column:span 6;">
-                          <h4>동영상</h4>
-                          <a href="{v}" target="_blank" class="thumb-wrap">
-                            <img src="{thumb}" class="thumb"/>
-                            <div class="play"></div>
-                          </a>
-                          <div class="helper">{v}</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"""
-                        <div class="card" style="grid-column:span 6;">
-                          <h4>동영상</h4>
-                          <a href="{v}" target="_blank">{v}</a>
-                        </div>
-                        """, unsafe_allow_html=True)
 else:
-    st.info("카메라로 촬영하거나 파일을 업로드하면 분석 결과와 라벨별 콘텐츠가 표시됩니다.")
+    st.info("이미지를 업로드하면 AI가 분석을 시작합니다.")
+
